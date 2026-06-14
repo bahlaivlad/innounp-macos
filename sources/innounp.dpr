@@ -864,7 +864,11 @@ begin
 //      if AFile^.DestName<>'' then FileName:=AnsiLowercase(PathExtractName(AFile^.DestName));
       MaskName:=AnsiLowercase(PathExtractName(FileMasks[i]));
       if MaskPath ='' then
-        Result:=WildcardMatch(PChar(FileName),PChar(AnsiLowercase(FileMasks[i])))
+        { MaskName already = AnsiLowercase(FileMasks[i]) here (no path part). Use it
+          rather than PChar(AnsiLowercase(...)): casting a temp AnsiString to PChar
+          (=PWideChar in this Unicode build) reinterprets its bytes as wide chars,
+          producing a garbage pattern that never matches. }
+        Result:=WildcardMatch(PChar(FileName),PChar(MaskName))
       else if IsWildcard(MaskName) then
         Result := WildcardMatch(PChar(FilePath + FileName), PChar(MaskPath + MaskName))
       else
