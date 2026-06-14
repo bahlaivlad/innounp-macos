@@ -35,7 +35,12 @@ type
   HWND    = PtrUInt;
   LANGID  = Word;
   UCHAR   = Byte;
-  HKEY    = PtrUInt;
+  { HKEY must be 4 bytes: the Inno on-disk TSetupRegistryEntry.RootKey field is a
+    32-bit value (matching 32-bit Delphi where HKEY=THandle=Longint). Using a
+    pointer-width type here makes the packed record 4 bytes too large, so
+    SECompressedBlockRead over-reads the per-entry remainder and desyncs every
+    setup that contains registry entries. }
+  HKEY    = DWORD;
 
   TFileTime = record
     dwLowDateTime: DWORD;
