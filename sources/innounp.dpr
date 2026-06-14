@@ -359,6 +359,8 @@ var
   Reader: TCacheReader;
   p:pointer;
   i:integer;
+  langProbeBmk: Cardinal;
+  langProbeLen: Integer;
 
   procedure ReadString(const R: TAbstractBlockReader; var Str: AnsiString);
   var
@@ -489,6 +491,25 @@ begin
         
         { Language entries }
         if Ver>=4000 then begin
+          { Some non-standard/modified Inno builds carry a TSetupLanguageEntry that
+            is 8 bytes larger than stock (an extra Cardinal before LanguageID plus a
+            LanguageCodePage field present even in Unicode builds). They still report
+            a normal version signature, so detect the layout at runtime: read the
+            first entry at the stock size and peek the following 4-byte length. If the
+            stream no longer aligns to a sane value the entry is the wider variant, so
+            grow the size. Self-validating - it never changes the size for stock
+            setups (their next length is small/valid). }
+          if VerIsUnicode and (SetupHeader.NumLanguageEntries > 0) then begin
+            Reader.CacheEnabled := true;
+            langProbeBmk := Reader.Bookmark;
+            SECompressedBlockSkip(Reader, SetupLanguageEntrySize,
+              MyTypes.SetupLanguageEntryStrings, MyTypes.SetupLanguageEntryAnsiStrings);
+            Reader.Read(langProbeLen, SizeOf(langProbeLen));
+            if (langProbeLen < 0) or (langProbeLen > $400000) then
+              MyTypes.SetupLanguageEntrySize := MyTypes.SetupLanguageEntrySize + 8;
+            Reader.Seek(langProbeBmk);
+            Reader.CacheEnabled := false;
+          end;
           p:=AllocMem(SetupLanguageEntrySize);
           for i:=0 to SetupHeader.NumLanguageEntries-1 do begin
             SECompressedBlockRead(Reader, p^, SetupLanguageEntrySize, MyTypes.SetupLanguageEntryStrings, MyTypes.SetupLanguageEntryAnsiStrings);
