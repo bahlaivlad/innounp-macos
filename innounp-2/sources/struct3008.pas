@@ -15,7 +15,7 @@ unit Struct3008;
 interface
 
 uses
-  Windows;
+  Winapi.Windows;
 
 const
   SetupTitle = 'My Inno Setup Extensions';

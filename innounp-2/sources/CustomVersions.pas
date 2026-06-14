@@ -54,69 +54,40 @@ function CheckResToolsVersion(Filename:string) : boolean;
 
 implementation
 
-uses Winapi.Windows, System.SysUtils, System.StrUtils;
-
-function PackageInfoTable(Module: HMODULE): PPackageInfoHeader;
-var
-  ResInfo: HRSRC;
-  Data: THandle;
-begin
-  Result := nil;
-  ResInfo := FindResource(Module, 'PACKAGEINFO', RT_RCDATA);
-  if ResInfo <> 0 then
-  begin
-    Data := LoadResource(Module, ResInfo);
-    if Data <> 0 then
-    try
-      Result := LockResource(Data);
-      UnlockResource(Data);
-    finally
-      FreeResource(Data);
-    end;
-  end;
-end;
+uses SysUtils, StrUtils, PEResource;
 
 function CheckResToolsVersion(Filename:string) : boolean;
 var
-  hMod: HMODULE;
+  Data: TBytes;
   InfoTable: PPackageInfoHeader;
   i: integer;
   PkgName: PPkgName;
   UName : PUnitName;
   Count: Integer;
 begin
+  { POSIX port: read the PACKAGEINFO resource directly from the PE image
+    instead of going through the Windows loader }
   Result := false;
-  hMod := LoadLibraryEx(PChar(Filename), 0, LOAD_LIBRARY_AS_DATAFILE);
+  if not LoadPEResourceNamed(Filename, PE_RT_RCDATA, 'PACKAGEINFO', Data) then
+    exit;
+  if Length(Data) < SizeOf(TPackageInfoHeader) then exit;
 
-  // Loading very large files in datafile mode requires a lot of memory
-  // And can sometimes fail if system memory is not very large.
-  // If this is the case then let's try to load file a regular module
-  if (hMod = 0) and (GetLastError() = ERROR_NOT_ENOUGH_MEMORY) then
-    hMod := LoadLibraryEx(PChar(Filename), 0, 0);
-
-  if hMod=0 then exit;
-
-  InfoTable := PackageInfoTable(hMod);
-
-  if Assigned(InfoTable) then
+  InfoTable := PPackageInfoHeader(@Data[0]);
+  PkgName := PPkgName(PByte(InfoTable) + SizeOf(InfoTable^));
+  { Skip the Requires list }
+  for I := 0 to InfoTable.RequiresCount - 1 do
+    PkgName := PPkgName(PByte(PkgName) + StrLen(PkgName.Name) + 2);
+  Count := Integer(Pointer(PkgName)^);
+  UName := PUnitName(PByte(PkgName) + 4);
+  for I := 0 to Count - 1 do
   begin
-    PkgName := PPkgName(Integer(InfoTable) + SizeOf(InfoTable^));
-    { Skip the Requires list }
-    for I := 0 to InfoTable.RequiresCount - 1 do Inc(Integer(PkgName), StrLen(PkgName.Name) + 2);
-    Count := Integer(Pointer(PkgName)^);
-    UName := PUnitName(Integer(PkgName) + 4);
-    for I := 0 to Count - 1 do
+    if AnsiStartsText('SetupLdr_D2009', UName.Name) then
     begin
-      if AnsiStartsText('SetupLdr_D2009', UName.Name) then
-      begin
-        Result := True;
-        break
-      end;
-      Inc(Integer(UName), StrLen(UName.Name) + 3);
+      Result := True;
+      break
     end;
+    UName := PUnitName(PByte(UName) + StrLen(UName.Name) + 3);
   end;
-
-  FreeLibrary(hMod);
 end;
 
 end.

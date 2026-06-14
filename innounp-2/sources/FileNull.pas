@@ -20,7 +20,7 @@ type
 
 implementation
 
-uses System.SysUtils;
+uses SysUtils;
 
 { TNullFile }
 

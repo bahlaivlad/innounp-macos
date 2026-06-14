@@ -14,7 +14,7 @@ unit zlib4008;
 interface
 
 uses
-  SysUtils, FileClass;
+  ctypes, SysUtils, FileClass;
 
 const
   { Some common compression levels. You may use one of these constants for
@@ -34,19 +34,21 @@ type
     CompressedSize, UncompressedSize, Adler: Longint;
   end;
 
-  TZAlloc = function(AppData: Pointer; Items, Size: Cardinal): Pointer;
-  TZFree = procedure(AppData, Block: Pointer);
+  TZAlloc = function(AppData: Pointer; Items, Size: cuint): Pointer; cdecl;
+  TZFree = procedure(AppData, Block: Pointer); cdecl;
 
-  TZStreamRec = packed record
-    next_in: PAnsiChar;       { next input byte }
+  { Matches the C z_stream layout on LP64 (macOS arm64) }
+{$PACKRECORDS C}
+  TZStreamRec = record
+    next_in: PByte;       { next input byte }
     avail_in: Cardinal;   { number of bytes available at next_in }
-    total_in: Longint;    { total nb of input bytes read so far }
+    total_in: culong;     { total nb of input bytes read so far }
 
-    next_out: PAnsiChar;      { next output byte should be put here }
+    next_out: PByte;      { next output byte should be put here }
     avail_out: Cardinal;  { remaining free space at next_out }
-    total_out: Longint;   { total nb of bytes output so far }
+    total_out: culong;    { total nb of bytes output so far }
 
-    msg: PAnsiChar;           { last error message, NULL if no error }
+    msg: PAnsiChar;       { last error message, NULL if no error }
     internal: Pointer;    { not visible by applications }
 
     zalloc: TZAlloc;      { used to allocate the internal state }
@@ -54,9 +56,10 @@ type
     AppData: Pointer;     { private data object passed to zalloc and zfree }
 
     data_type: Integer;   { best guess about the data type: ascii or binary }
-    adler: Longint;       { adler32 value of the uncompressed data }
-    reserved: Longint;    { reserved for future use }
+    adler: culong;        { adler32 value of the uncompressed data }
+    reserved: culong;     { reserved for future use }
   end;
+{$PACKRECORDS DEFAULT}
 
   TNewBlockDeflateHeader = packed record
     CompressedSize, UncompressedSize: Longint;
@@ -198,7 +201,7 @@ function InflateData(var ASource; const ASourceSize: Longint; const ASourceIsFil
 { *** Low-level compression functions *** }
 
 type
-  TZReadProc = function(var Buf; MaxBytes: Cardinal; ExtraData: Longint): Cardinal;
+  TZReadProc = function(var Buf; MaxBytes: Cardinal; ExtraData: PtrInt): Cardinal;
   { A custom callback function used by CustomDeflateData and CustomInflateData.
     This is called whenever data needs to be read. The data read should be
     stored in Buf, up to a maximum of MaxBytes. ExtraData is the same as the
@@ -207,7 +210,7 @@ type
     MaxBytes. CustomDeflateData or CustomInflateData will continue calling this
     function until it returns zero.
     NOTE: This function must be declared as 'far' when compiling under Delphi 1 }
-  TZWriteProc = function(var Buf; BufSize: Cardinal; ExtraData: Longint): Cardinal;
+  TZWriteProc = function(var Buf; BufSize: Cardinal; ExtraData: PtrInt): Cardinal;
   { A custom callback function used by CustomDeflateData and CustomInflateData.
     This is called whenever data needs to be written. Buf specifies the data,
     BufSize specifies the size of Buf, and ExtraData is the same as the
@@ -218,7 +221,7 @@ type
     NOTE: This function must be declared as 'far' when compiling under Delphi 1 }
 
 function CustomDeflateData(const ReadProc: TZReadProc; const WriteProc: TZWriteProc;
-  const ExtraData: Longint; const CompressionLevel: TCompressionLevel;
+  const ExtraData: PtrInt; const CompressionLevel: TCompressionLevel;
   var BytesWritten, Adler: Longint): Boolean;
 { Just like DeflateData, but reads and writes data by use of callback
   functions specified by the ReadProc and WriteProc parameters. ExtraData is
@@ -230,7 +233,7 @@ function CustomDeflateData(const ReadProc: TZReadProc; const WriteProc: TZWriteP
   Exceptions are raised for other errors. }
 
 function CustomInflateData(const ReadProc: TZReadProc; const WriteProc: TZWriteProc;
-  const ExtraData: Longint; var Adler: Longint): Boolean;
+  const ExtraData: PtrInt; var Adler: Longint): Boolean;
 { Just like InflateData, but reads and writes data by use of callback
   functions specified by the ReadProc and WriteProc parameters. ExtraData is
   application-defined, and not used by this unit in any way, except to pass
@@ -290,86 +293,35 @@ const
   Z_UNKNOWN = 2;
 
   Z_DEFLATED = 8;
-(*
-{$IFDEF WIN32}
-{$L zlib32\deflate.obj}
-{$L zlib32\inflate.obj}
-{$L zlib32\inftrees.obj}
-{$L zlib32\trees.obj}
-{$L zlib32\adler32.obj}
-{$L zlib32\infblock.obj}
-{$L zlib32\infcodes.obj}
-{$L zlib32\infutil.obj}
-{$L zlib32\inffast.obj}
-{$ELSE}
-{$L zlib16\deflate.obj}
-{$L zlib16\inflate.obj}
-{$L zlib16\inftrees.obj}
-{$L zlib16\trees.obj}
-{$L zlib16\adler32.obj}
-{$L zlib16\infblock.obj}
-{$L zlib16\infcodes.obj}
-{$L zlib16\infutil.obj}
-{$L zlib16\inffast.obj}
-{$L zlib16\h_scopy.obj}
-{$L zlib16\h_llsh.obj}
-{$L zlib16\h_lursh.obj}
-{$L zlib16\f_lxmul.obj}
-{$L zlib16\h_spush.obj}
-{$L zlib16\h_ldiv.obj}
-{$ENDIF}
 
-{$IFDEF WIN32}
-procedure _tr_init; external;
-procedure _tr_flush_block; external;
-procedure _tr_align; external;
-procedure _tr_stored_block; external;
-{$ENDIF}
-function adler32(adler: Longint; const buf; len: Cardinal): Longint; far; external;
-procedure inflate_blocks_new; external;
-procedure inflate_blocks; external;
-procedure inflate_blocks_reset; external;
-procedure inflate_blocks_free; external;
-procedure inflate_set_dictionary; external;
-procedure inflate_trees_bits; external;
-procedure inflate_trees_dynamic; external;
-procedure inflate_trees_fixed; external;
-procedure inflate_codes_new; external;
-procedure inflate_codes; external;
-procedure inflate_codes_free; external;
-procedure inflate_flush; external;
-procedure inflate_fast; external;
+{ macOS/FPC port: the statically linked x86 zlib objects were replaced by
+  calls into the system zlib library. The stream record above matches the
+  LP64 z_stream layout. }
 
-procedure _memset(P: Pointer; B: Byte; Count: Cardinal); cdecl; far;
+const
+{$LINKLIB z}
+  libz = 'z';
+
+function deflateInit_(var strm: TZStreamRec; level: Integer; version: PAnsiChar;
+  recsize: Integer): Integer; cdecl; external libz name 'deflateInit_';
+function deflate(var strm: TZStreamRec; flush: Integer): Integer; cdecl; external libz name 'deflate';
+function deflateEnd(var strm: TZStreamRec): Integer; cdecl; external libz name 'deflateEnd';
+function inflateInit_(var strm: TZStreamRec; version: PAnsiChar;
+  recsize: Integer): Integer; cdecl; external libz name 'inflateInit_';
+function inflate(var strm: TZStreamRec; flush: Integer): Integer; cdecl; external libz name 'inflate';
+function inflateEnd(var strm: TZStreamRec): Integer; cdecl; external libz name 'inflateEnd';
+function inflateReset(var strm: TZStreamRec): Integer; cdecl; external libz name 'inflateReset';
+function zsysadler32(adler: culong; const buf; len: cuint): culong; cdecl; external libz name 'adler32';
+
+function adler32(adler: Longint; const buf; len: Cardinal): Longint;
 begin
-  FillChar(P^, Count, B);
-end;
-
-procedure _memcpy(Dest, Source: Pointer; Count: Cardinal); cdecl; far;
-begin
-  Move(Source^, Dest^, Count);
+  Result := Longint(Cardinal(zsysadler32(culong(Cardinal(adler)), buf, len) and $FFFFFFFF));
 end;
 
 
-function deflateInit_ (var strm: TZStreamRec; level: Integer; version: PChar;
-  recsize: Integer): Integer; far; external;
-function deflate(var strm: TZStreamRec; flush: Integer): Integer; far; external;
-function deflateEnd(var strm: TZStreamRec): Integer; far; external;
-*)
-// all these are now imported from zlib.pas
-{
-function adler32(adler: Longint; const buf; len: Cardinal): Longint; far; external;
-function inflateInit_ (var strm: TZStreamRec; version: PChar;
-  recsize: Integer): Integer; far; external;
-function inflate(var strm: TZStreamRec; flush: Integer): Integer; far; external;
-function inflateEnd(var strm: TZStreamRec): Integer; far; external;
-}
-//function inflateReset(var strm: TZStreamRec): Integer; far; external;
 
-
-function zlibAllocMem(AppData: Pointer; Items, Size: Cardinal): Pointer; far;
+function zlibAllocMem(AppData: Pointer; Items, Size: cuint): Pointer; cdecl;
 begin
-  {$IFDEF WIN32}
   try
     GetMem(Result, Items * Size);
   except
@@ -377,24 +329,11 @@ begin
       of memory }
     Result := nil;
   end;
-  {$ELSE}
-  { GlobalAlloc is used instead of GetMem or LocalAlloc since it allows
-    allocating objects >65535 bytes. zlib requires an allocator that is able
-    to allocate up to 65536 bytes.
-    Note: The Longint casts below are to ensure the multiply operation is 32
-    bits. (If they aren't there, it will clip to 16 bits.) }
-  Result := GlobalAllocPtr(GMEM_MOVEABLE, Longint(Items) * Longint(Size));
-  {$ENDIF}
 end;
 
-procedure zlibFreeMem(AppData, Block: Pointer); far;
+procedure zlibFreeMem(AppData, Block: Pointer); cdecl;
 begin
-  {$IFDEF WIN32}
   FreeMem(Block);
-  {$ELSE}
-  if Assigned(Block) then
-    GlobalFreePtr(Block);
-  {$ENDIF}
 end;
 
 function MemCheck(const Code: Integer): Integer;
@@ -418,7 +357,7 @@ begin
 end;
 
 const
-  BufferSize = {$IFDEF WIN32} 65536 {$ELSE} 32000 {$ENDIF};
+  BufferSize = 65536;
 
 procedure InitStream(var strm: TZStreamRec);
 begin
@@ -434,7 +373,7 @@ const
 
 (*
 function CustomDeflateData(const ReadProc: TZReadProc; const WriteProc: TZWriteProc;
-  const ExtraData: Longint; const CompressionLevel: TCompressionLevel;
+  const ExtraData: PtrInt; const CompressionLevel: TCompressionLevel;
   var BytesWritten, Adler: Longint): Boolean;
 var
   strm: TZStreamRec;
@@ -491,14 +430,14 @@ begin
         raise EZlibInternalError.CreateFmt(SZlibInternalError, [Res]);
     end;
   finally
-    if Assigned(O) then FreeMem(O {$IFNDEF WIN32}, BufferSize{$ENDIF});
-    if Assigned(I) then FreeMem(I {$IFNDEF WIN32}, BufferSize{$ENDIF});
+    if Assigned(O) then FreeMem(O);
+    if Assigned(I) then FreeMem(I);
   end;
   Result := True;
 end;
 
 function CustomInflateData(const ReadProc: TZReadProc; const WriteProc: TZWriteProc;
-  const ExtraData: Longint; var Adler: Longint): Boolean;
+  const ExtraData: PtrInt; var Adler: Longint): Boolean;
 var
   strm: TZStreamRec;
   I, O: Pointer;
@@ -539,8 +478,8 @@ begin
             raise EZlibInternalError.CreateFmt(SZlibInternalError, [Res]);
           end;
           if strm.total_out <> 0 then begin
-            if {$IFDEF WIN32}Integer({$ENDIF} WriteProc(O^, strm.total_out, ExtraData)
-               {$IFDEF WIN32}){$ENDIF} <> strm.total_out then
+            if WriteProc(O^, strm.total_out, ExtraData)
+               <> strm.total_out then
               Exit;
             { For some reason, the adler field of strm gets reset to 1 after the last
               block of data has been decompressed, making it unusable. So it has to
@@ -555,10 +494,10 @@ begin
           raise EZlibInternalError.CreateFmt(SZlibInternalError, [Res]);
       end;
     finally
-      FreeMem(O {$IFNDEF WIN32}, BufferSize{$ENDIF});
+      FreeMem(O);
     end;
   finally
-    FreeMem(I {$IFNDEF WIN32}, BufferSize{$ENDIF});
+    FreeMem(I);
   end;
   Result := True;
 end;
@@ -571,42 +510,34 @@ type
     SourceIsFile, DestIsFile: Boolean;
   end;
 
-function DataReadProc(var Buf; MaxBytes: Cardinal; ExtraData: Longint): Cardinal; far;
+function DataReadProc(var Buf; MaxBytes: Cardinal; ExtraData: PtrInt): Cardinal;
 begin
   with PExtraData(ExtraData)^ do begin
-    if {$IFDEF WIN32}Integer({$ENDIF} MaxBytes {$IFDEF WIN32}){$ENDIF} > SourceSize then
+    if MaxBytes > SourceSize then
       MaxBytes := SourceSize;
     Result := MaxBytes;
     if SourceIsFile then
       BlockRead(File(Source^), Buf, MaxBytes)
     else begin
       Move(Source^, Buf, MaxBytes);
-      {$IFDEF WIN32}
-      Inc(Cardinal(Source), MaxBytes);
-      {$ELSE}
-      Inc(LongRec(Source).Lo, MaxBytes);
-      {$ENDIF}
+            Inc(PByte(Source), MaxBytes);
     end;
     Dec(SourceSize, MaxBytes);
   end;
 end;
 
-function DataWriteProc(var Buf; BufSize: Cardinal; ExtraData: Longint): Cardinal; far;
+function DataWriteProc(var Buf; BufSize: Cardinal; ExtraData: PtrInt): Cardinal;
 begin
   with PExtraData(ExtraData)^ do begin
     if (DestSize <> -1) and
-       ({$IFDEF WIN32}Integer({$ENDIF} BufSize {$IFDEF WIN32}){$ENDIF} > DestSize) then
+       (BufSize > DestSize) then
       BufSize := DestSize;
     Result := BufSize;
     if DestIsFile then
       BlockWrite(File(Dest^), Buf, BufSize)
     else begin
       Move(Buf, Dest^, BufSize);
-      {$IFDEF WIN32}
-      Inc(Cardinal(Dest), BufSize);
-      {$ELSE}
-      Inc(LongRec(Dest).Lo, BufSize);
-      {$ENDIF}
+            Inc(PByte(Dest), BufSize);
     end;
     if DestSize <> -1 then
       Dec(DestSize, BufSize);
@@ -628,7 +559,7 @@ begin
     SourceIsFile := ASourceIsFile;
     DestIsFile := ADestIsFile;
   end;
-  Result := CustomDeflateData(DataReadProc, DataWriteProc, Longint(@Extra),
+  Result := CustomDeflateData(DataReadProc, DataWriteProc, PtrInt(@Extra),
     CompressionLevel, BytesWritten, Adler);
 end;
 
@@ -646,7 +577,7 @@ begin
     SourceIsFile := ASourceIsFile;
     DestIsFile := ADestIsFile;
   end;
-  Result := CustomInflateData(DataReadProc, DataWriteProc, Longint(@Extra),
+  Result := CustomInflateData(DataReadProc, DataWriteProc, PtrInt(@Extra),
     Adler);
 end;
 
@@ -753,7 +684,7 @@ begin
         if InBufferCount = SizeOf(InBuffer) then
           DeflateBuf(Data, InBuffer, InBufferCount);
         Dec(Count, Bytes);
-        Inc(Cardinal(P), Bytes);
+        Inc(PByte(P), Bytes);
       end;
     end
     else begin
@@ -835,7 +766,7 @@ begin
   with Data do begin
     InitStream(strm);
     if Compressed then begin
-      Res := MemCheck(inflateInit_(zlib.TZStreamRec(strm), zlib_version, SizeOf(strm)));
+      Res := MemCheck(inflateInit_(strm, zlib_version, SizeOf(strm)));
       if Res <> Z_OK then
         raise EZlibInternalError.CreateFmt(SZlibInternalError, [Res]);
     end;
@@ -870,11 +801,11 @@ begin
           raise EZlibDataError.Create(SZlibDataError);
       end;
       if (strm.avail_out <> 0) and
-         (Cardinal(strm.next_out) - Cardinal(@OutBuffer[OutBufferStart]) < Left) then begin
+         (PtrUInt(strm.next_out) - PtrUInt(@OutBuffer[OutBufferStart]) < Left) then begin
         if NoMoreData then
           raise EZlibDataError.Create(SZlibDataError);
         if Compressed then begin
-          Res := MemCheck(inflate(zlib.TZStreamRec(strm), Z_NO_FLUSH));
+          Res := MemCheck(inflate(strm, Z_NO_FLUSH));
           case Res of
             Z_OK: ;
             Z_STREAM_END: NoMoreData := True;
@@ -901,7 +832,7 @@ begin
         if OutCount > Left then OutCount := Left;
         Move(OutBuffer[OutBufferStart], B^, OutCount);
         Dec(Left, OutCount);
-        Inc(Longint(B), OutCount);
+        Inc(PByte(B), OutCount);
         Inc(OutBufferStart, OutCount);
         if OutBufferStart = SizeOf(OutBuffer) then begin
           strm.next_out := @OutBuffer;
@@ -916,7 +847,7 @@ end;
 procedure InflateBlockReadEnd(var Data: TDeflateBlockReadData);
 begin
   if Data.Compressed then
-    inflateEnd(zlib.TZStreamRec(Data.strm));
+    inflateEnd(Data.strm);
 end;
 
 function CalcAdler32(CurAdler: Longint; const Buf; const BufSize: Cardinal): Longint;
@@ -956,7 +887,7 @@ begin
   end;
   P := @Buf;
   while BufSize <> 0 do begin
-    CurCRC := CRC32Table[Lo(CurCRC) xor P^] xor (CurCRC shr 8);
+    CurCRC := CRC32Table[(CurCRC and $FF) xor P^] xor (CurCRC shr 8);
     Dec(BufSize);
     Inc(P);
   end;

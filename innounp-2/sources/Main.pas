@@ -2,7 +2,7 @@ unit Main;
 
 interface
 
-uses System.Classes, System.SysUtils, System.UITypes, System.Generics.Collections,
+uses Classes, SysUtils, UITypes, Generics.Collections,
   MyTypes, Struct;
 
 type
@@ -35,7 +35,7 @@ const
   clAqua = TColors.Aqua;
 
 type
-  TAnsiStringList = System.Generics.Collections.TList<AnsiString>;
+  TAnsiStringList = Generics.Collections.TList<AnsiString>;
 
 var
   SetupLdrOffset0 : int64;
@@ -64,7 +64,7 @@ var
   ScriptAsUtf8 : boolean = true;
   UseReg : boolean = false;  // use regional settings instead of default,
                              // e.g. for thousands separator and date/time format
-  UseUtf8 : boolean=false;
+  UseUtf8 : boolean=true;  // macOS terminals are UTF-8
   ConsoleCodePage : cardinal = 850;
   DefaultCodePage : cardinal = 0;
   ColorMode : integer = 1;
@@ -110,7 +110,7 @@ procedure GenerateEncryptionKey(const Password: String; const Salt: TSetupKDFSal
 
 implementation
 
-uses Winapi.Windows, System.StrUtils, MD5, SHA1, SHA256, ChaCha20, PathFunc, PBKDF2, CmnFunc2, Msgs, MsgIds;
+uses Winapi.Windows, StrUtils, MD5, SHA1, SHA256, ChaCha20, PathFunc, PBKDF2, CmnFunc2, Msgs, MsgIds;
 
 procedure InternalError(const Id: String);
 begin
@@ -203,8 +203,8 @@ end;
 
 function OemToStr(const s : AnsiString) : string;
 begin
-  Result:=s; UniqueString(Result);
-  OemToCharBuff(PAnsiChar(Result),PChar(Result),length(Result));
+  { POSIX port: no OEM codepages; plain conversion }
+  Result:=String(s);
 end;
 
 function ApplyCodepage (const s : string; cp : cardinal) : string;
@@ -384,7 +384,7 @@ begin
 
 function DateTimeString (dt : TDateTime) : string;
 begin
-  if UseReg then DateTimeToString(Result,'ddddd t',dt)
+  if UseReg then Result:=FormatDateTime('ddddd t',dt)
   else Result:=FormatDateTime('yyyy-mm-dd hh:mm',dt);
   end;
 
@@ -519,11 +519,11 @@ begin
     sm:=copy(AText,5,length(AText)-5);
     MsgName:=ReadNxtStr(sm);
     Args:=nil; n:=0;
-    if not sm.IsEmpty then repeat
+    if sm<>'' then repeat
       SetLength(Args,n+1);
       Args[n]:=ReadNxtStr(sm);
       inc(n);
-      until sm.IsEmpty;
+      until sm='';
     if FindCustomMessage(MsgName,sm) then Result:=CmFormat(sm,Args)
     else Result:=AText;
     end

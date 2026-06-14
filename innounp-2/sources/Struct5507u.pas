@@ -13,7 +13,7 @@ unit Struct5507u;
 interface
 
 uses
-  Windows, Int64Em, SHA1;
+  Winapi.Windows, Int64Em, SHA1;
 
 {$DEFINE ISUNICODE}
 

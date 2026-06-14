@@ -15,7 +15,7 @@ unit Struct4206;
 interface
 
 uses
-  Windows, Int64Em, MD5;
+  Winapi.Windows, Int64Em, MD5;
 
 const
   SetupTitle = 'Inno Setup';

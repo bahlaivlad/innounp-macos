@@ -17,7 +17,7 @@ unit Extract;
 interface
 
 uses
-  Winapi.Windows, System.SysUtils, FileClass, Compress, Struct, ArcFour;
+  Winapi.Windows, SysUtils, FileClass, Compress, Struct, ArcFour;
 
 type
   TExtractorProgressProc = procedure(Bytes: Cardinal);
@@ -62,12 +62,12 @@ function OpenFileDlg(FileName, StartDir:string):string; // empty on errors
 implementation
 
 uses
-  Winapi.CommDlg, PathFunc, CmnFunc2, Main, Msgs, MsgIDs, zlib, bzlib, Compression.LZMADecompressor,
+  PathFunc, CmnFunc2, Main, Msgs, MsgIDs, zlib, bzlib, Compression.LZMADecompressor,
   CallOptimizer, MD5, SHA1, SHA256, Int64Em, MyTypes {NewDisk};
 
 procedure SourceIsCorrupted (const Msg : string);
 begin
-  if Msg.IsEmpty then raise Exception.Create(SetupMessages[msgSourceIsCorrupted])
+  if Msg='' then raise Exception.Create(SetupMessages[msgSourceIsCorrupted])
   else raise Exception.Create(Msg);
 end;
 
@@ -312,7 +312,7 @@ begin
       Break
     else begin
       Dec(Left, Res);
-      Inc(Longint(Buffer), Res);
+      Inc(PByte(Buffer), Res);
       { Go to next disk }
       if FOpenedSlice >= FChunkLastSlice then
         { Already on the last slice, so the file must be corrupted... }
@@ -504,32 +504,9 @@ begin
 end;
 
 function OpenFileDlg(FileName, StartDir:string):string; // empty on errors
-var
-  ofn:TOpenFilename;
-  filterbuf,outbuf,savedir:array[0..1023] of char;
-  p:PChar;
-  tmp:bool;
 begin
+  { POSIX port: no GUI file dialog; behave as if the user cancelled }
   Result:='';
-  FillChar(ofn,sizeof(ofn),0);
-  with ofn do begin
-    lStructSize:=sizeof(ofn);
-    p:=StrCopy(filterbuf,PChar(FileName))+length(FileName)+1;
-    p:=StrCopy(p,PChar(FileName))+length(FileName)+1;
-    p^:=#0;
-    lpstrFilter:=filterbuf;
-    StrCopy(outbuf,PChar(FileName));
-    lpstrFile:=outbuf;
-    nMaxFile:=sizeof(outbuf);
-    lpstrInitialDir:=PChar(StartDir);
-    lpstrTitle:='Specify location of or insert the disk with the required file';
-    Flags := OFN_FILEMUSTEXIST or OFN_PATHMUSTEXIST or OFN_NOCHANGEDIR or OFN_DONTADDTORECENT;
-  end;
-  savedir[0]:=#0; GetCurrentDirectory(sizeof(savedir),savedir);
-  tmp:=GetOpenFileName(ofn);
-  if savedir[0]<>#0 then SetCurrentDirectory(savedir);
-  if not tmp then exit;
-  Result:=outbuf;
 end;
 
 end.

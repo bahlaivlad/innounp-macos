@@ -28,10 +28,10 @@ type
 
 implementation
 uses
-  System.SysUtils, zlib, bzlib, Msgs, CmnFunc2, PathFunc, Main, MyTypes, Winapi.Windows;
+  SysUtils, zlib, bzlib, Msgs, CmnFunc2, PathFunc, Main, MyTypes, Winapi.Windows;
 
 function BZCustomInflateData(const ReadProc: TZReadProc; const WriteProc: TZWriteProc;
-  const ExtraData: Longint; var Adler: Longint): Boolean; forward;
+  const ExtraData: PtrInt; var Adler: Longint): Boolean; forward;
 
 procedure SourceIsCorrupted;
 begin
@@ -53,7 +53,7 @@ begin
     SourceIsCorrupted;
 end;
 
-function zlibReadProc(var Buf; MaxBytes: Cardinal; ExtraData: Longint): Cardinal; far;
+function zlibReadProc(var Buf; MaxBytes: Cardinal; ExtraData: PtrInt): Cardinal;
 var
   Buffer: Pointer;
   Left, Res: Cardinal;
@@ -71,7 +71,7 @@ begin
         Break
       else begin
         Dec(Left, Res);
-        Inc(Longint(Buffer), Res);
+        Inc(PByte(Buffer), Res);
         { Go to next disk }
         if CurSlice >= LastSlice then
           { Already on the last slice, so the file must be corrupted... }
@@ -90,7 +90,7 @@ begin
   end;*)
 end;
 
-function zlibWriteProc(var Buf; BufSize: Cardinal; ExtraData: Longint): Cardinal; far;
+function zlibWriteProc(var Buf; BufSize: Cardinal; ExtraData: PtrInt): Cardinal;
 begin
   with PDecompressExtraData(ExtraData)^ do begin
     Inc(BytesWritten, BufSize);
@@ -154,8 +154,8 @@ begin
 
   try
     case SetupHeader.CompressMethod of
-      cmZip: CustomInflateData(zlibReadProc, zlibWriteProc, Longint(@DecompressData), Adler32);
-      cmBzip: BZCustomInflateData(zlibReadProc, zlibWriteProc, Longint(@DecompressData), Adler32);
+      cmZip: CustomInflateData(zlibReadProc, zlibWriteProc, PtrInt(@DecompressData), Adler32);
+      cmBzip: BZCustomInflateData(zlibReadProc, zlibWriteProc, PtrInt(@DecompressData), Adler32);
     end;
   except
     on ECompressDataError do
@@ -211,7 +211,7 @@ const
   SBzlibInternalError = 'bzlib: Internal error. Code %d';
 
 
-function BZAllocMem(AppData: Pointer; Items, Size: Cardinal): Pointer; stdcall;
+function BZAllocMem(AppData: Pointer; Items, Size: Integer): Pointer; cdecl;
 begin
   try
     GetMem(Result, Items * Size);
@@ -222,7 +222,7 @@ begin
   end;
 end;
 
-procedure BZFreeMem(AppData, Block: Pointer); stdcall;
+procedure BZFreeMem(AppData, Block: Pointer); cdecl;
 begin
   FreeMem(Block);
 end;
@@ -247,7 +247,7 @@ const
   BufferSize = 65536;
 
 function BZCustomInflateData(const ReadProc: TZReadProc; const WriteProc: TZWriteProc;
-  const ExtraData: Longint; var Adler: Longint): Boolean;
+  const ExtraData: PtrInt; var Adler: Longint): Boolean;
 var
   strm: TBZStreamRec;
   I, O: Pointer;

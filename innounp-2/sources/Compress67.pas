@@ -16,7 +16,7 @@ unit Compress67;
 interface
 
 uses
-  System.SysUtils, Int64Em, FileClass, Compress;
+  SysUtils, Int64Em, FileClass, Compress;
 
 type
   TCompressedBlockReader = class(TAbstractBlockReader)

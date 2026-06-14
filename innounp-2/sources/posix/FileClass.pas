@@ -7,18 +7,19 @@ unit FileClass;
   For conditions of distribution and use, see LICENSE.TXT.
 
   TFile class
-  Better than File and TFileStream in that does more extensive error checking
-  and uses descriptive, localized system error messages.
+  POSIX implementation for the macOS/FPC port of innounp.
+  The public interface matches the original Win32 unit; handles are
+  POSIX file descriptors.
 
   TTextFileReader and TTextFileWriter support ANSI and UTF8 textfiles.
-
-  modified for "innounp" and compilation with Delphi 10 by J. Rathlev, January 2025
 }
 
 interface
 
+{$MODE DELPHIUNICODE}
+
 uses
-  Winapi.Windows, System.SysUtils, Int64Em;
+  Winapi.Windows, SysUtils, Int64Em;
 
 type
   TFileCreateDisposition = (fdCreateAlways, fdCreateNew, fdOpenExisting,
@@ -125,20 +126,6 @@ type
     procedure WriteAnsiLine(const S: AnsiString);
   end;
 
-  TFileMapping = class
-  private
-    FMemory: Pointer;
-    FMapSize: Cardinal;
-    FMappingHandle: THandle;
-  public
-    constructor Create(AFile: TFile; AWritable: Boolean);
-    destructor Destroy; override;
-    procedure Commit;
-    procedure ReraiseInPageErrorAsFileException;
-    property MapSize: Cardinal read FMapSize;
-    property Memory: Pointer read FMemory;
-  end;
-
   EFileError = class(Exception)
   private
     FErrorCode: DWORD;
@@ -146,20 +133,24 @@ type
     property ErrorCode: DWORD read FErrorCode;
   end;
 
-{ ---------------------------------------------------------------- }
-{$EXTERNALSYM GetFileSizeEx}
-function GetFileSizeEx(hFile: THandle; lpFileSize : pointer): BOOL; stdcall;
-
 implementation
 
 uses
-  WideStrUtils, CmnFunc2;
-//  Shared.CommonFunc;
+  BaseUnix, WideStrUtils, CmnFunc2;
 
 const
   SGenericIOError = 'File I/O error %d';
 
-function GetFileSizeEx; external kernel32 name 'GetFileSizeEx';
+function Int64ToInteger64(const V: Int64): Integer64;
+begin
+  Result.Lo := LongWord(V and $FFFFFFFF);
+  Result.Hi := LongWord(V shr 32);
+end;
+
+function Integer64ToInt64(const V: Integer64): Int64;
+begin
+  Result := (Int64(V.Hi) shl 32) or V.Lo;
+end;
 
 { TCustomFile }
 
@@ -180,12 +171,18 @@ var
   S: String;
   E: EFileError;
 begin
-  S := Win32ErrorString(ErrorCode);
-  if S = '' then begin
-    { In case there was no text for the error code. Shouldn't get here under
-      normal circumstances. }
-    S := Format(SGenericIOError, [ErrorCode]);
+  { Explicitly raised Win32 codes get fixed messages; everything else is
+    treated as errno (see RaiseLastError). }
+  case ErrorCode of
+    ERROR_HANDLE_EOF:    S := 'Reached the end of the file';
+    ERROR_WRITE_FAULT:   S := 'The system cannot write to the specified device';
+    ERROR_READ_FAULT:    S := 'The system cannot read from the specified device';
+    ERROR_NEGATIVE_SEEK: S := 'An attempt was made to move the file pointer before the beginning of the file';
+  else
+    S := Win32ErrorString(ErrorCode);
   end;
+  if S = '' then
+    S := Format(SGenericIOError, [ErrorCode]);
   E := EFileError.Create(S);
   E.FErrorCode := ErrorCode;
   raise E;
@@ -219,8 +216,6 @@ begin
 end;
 
 { TFile }
-const
-  INVALID_FILE_ATTRIBUTES = DWORD($FFFFFFFF);
 
 constructor TFile.Create(const AFilename: String;
   ACreateDisposition: TFileCreateDisposition; AAccess: TFileAccess;
@@ -228,7 +223,7 @@ constructor TFile.Create(const AFilename: String;
 begin
   inherited Create;
   FHandle := CreateHandle(AFilename, ACreateDisposition, AAccess, ASharing);
-  if (FHandle = 0) or (FHandle = INVALID_HANDLE_VALUE) then
+  if FHandle = INVALID_HANDLE_VALUE then
     RaiseLastError;
   FHandleCreated := True;
 end;
@@ -250,100 +245,106 @@ function TFile.CreateHandle(const AFilename: String;
   ACreateDisposition: TFileCreateDisposition; AAccess: TFileAccess;
   ASharing: TFileSharing): THandle;
 const
-  AccessFlags: array[TFileAccess] of DWORD =
-    (GENERIC_READ, GENERIC_WRITE, GENERIC_READ or GENERIC_WRITE);
-  SharingFlags: array[TFileSharing] of DWORD =
-    (0, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_SHARE_READ or FILE_SHARE_WRITE);
-  Disps: array[TFileCreateDisposition] of DWORD =
-    (CREATE_ALWAYS, CREATE_NEW, OPEN_EXISTING, OPEN_ALWAYS, TRUNCATE_EXISTING);
+  AccessFlags: array[TFileAccess] of cint = (O_RDONLY, O_WRONLY, O_RDWR);
+  Disps: array[TFileCreateDisposition] of cint =
+    (O_CREAT or O_TRUNC, O_CREAT or O_EXCL, 0, O_CREAT, O_TRUNC);
+var
+  P: RawByteString;
+  FD: cint;
 begin
-  Result := CreateFile(PChar(AFilename), AccessFlags[AAccess],
-    SharingFlags[ASharing], nil, Disps[ACreateDisposition],
-    FILE_ATTRIBUTE_NORMAL, 0);
+  P := Utf8Encode(AFilename);
+  repeat
+    FD := FpOpen(PAnsiChar(P), AccessFlags[AAccess] or Disps[ACreateDisposition],
+      &644);
+  until (FD >= 0) or (fpgeterrno <> ESysEINTR);
+  if FD < 0 then begin
+    SetLastError(DWORD(fpgeterrno));
+    Result := INVALID_HANDLE_VALUE;
+  end
+  else
+    Result := THandle(FD);
 end;
 
 function TFile.GetPosition: Integer64;
+var
+  Pos: TOff;
 begin
-  if not SetFilePointerEx(FHandle, 0, @Result, FILE_CURRENT) then
+  Pos := FpLseek(cint(FHandle), 0, SEEK_CUR);
+  if Pos < 0 then begin
+    SetLastError(DWORD(fpgeterrno));
     RaiseLastError;
+  end;
+  Result := Int64ToInteger64(Pos);
 end;
 
-//function TFile.GetPosition: Integer64;
-//begin
-//  Result.Hi := 0;
-//  Result.Lo := SetFilePointer(FHandle, 0, @Result.Hi, FILE_CURRENT);
-//  if (Result.Lo = INVALID_FILE_ATTRIBUTES) and (GetLastError <> 0) then
-//    RaiseLastError;
-//end;
-//
 function TFile.GetSize: Integer64;
+var
+  Info: Stat;
 begin
-  if not GetFileSizeEx(FHandle, @Result) then
+  if FpFStat(cint(FHandle), Info) <> 0 then begin
+    SetLastError(DWORD(fpgeterrno));
     RaiseLastError;
+  end;
+  Result := Int64ToInteger64(Info.st_size);
 end;
 
-//function TFile.GetSize: Integer64;
-//begin
-//  Result.Lo := GetFileSize(FHandle, @Result.Hi);
-//  if (Result.Lo = INVALID_FILE_ATTRIBUTES) and (GetLastError <> 0) then
-//    RaiseLastError;
-//end;
-//
 function TFile.Read(var Buffer; Count: Cardinal): Cardinal;
+var
+  Res: TsSize;
 begin
-  if not ReadFile(FHandle, Buffer, Count, DWORD(Result), nil) then
-    if FHandleCreated or (GetLastError <> ERROR_BROKEN_PIPE) then
+  repeat
+    Res := FpRead(cint(FHandle), Buffer, Count);
+  until (Res >= 0) or (fpgeterrno <> ESysEINTR);
+  if Res < 0 then begin
+    SetLastError(DWORD(fpgeterrno));
+    if FHandleCreated or (fpgeterrno <> ESysEPIPE) then
       RaiseLastError;
+    Res := 0;
+  end;
+  Result := Cardinal(Res);
 end;
 
 procedure TFile.Seek64(Offset: Integer64);
 begin
-  if not SetFilePointerEx(FHandle, Int64(Offset), nil, FILE_BEGIN) then
+  if FpLseek(cint(FHandle), Integer64ToInt64(Offset), SEEK_SET) < 0 then begin
+    SetLastError(DWORD(fpgeterrno));
     RaiseLastError;
+  end;
 end;
-
-//procedure TFile.Seek64(Offset: Integer64);
-//begin
-//  if (SetFilePointer(FHandle, Integer(Offset.Lo), @Offset.Hi,
-//      FILE_BEGIN) = INVALID_FILE_ATTRIBUTES) and (GetLastError <> 0) then
-//    RaiseLastError;
-//end;
 
 procedure TFile.SeekToEnd;
 begin
-  if not SetFilePointerEx(FHandle, 0, nil, FILE_END) then
+  if FpLseek(cint(FHandle), 0, SEEK_END) < 0 then begin
+    SetLastError(DWORD(fpgeterrno));
     RaiseLastError;
+  end;
 end;
 
-//procedure TFile.SeekToEnd;
-//var
-//  DistanceHigh: Integer;
-//begin
-//  DistanceHigh := 0;
-//  if (SetFilePointer(FHandle, 0, @DistanceHigh, FILE_END) = $FFFFFFFF) and
-//     (GetLastError <> 0) then
-//    RaiseLastError;
-//end;
-//
 procedure TFile.Truncate;
+var
+  Pos: TOff;
 begin
-  if not SetEndOfFile(FHandle) then
+  { Win32 SetEndOfFile truncates at the current file pointer }
+  Pos := FpLseek(cint(FHandle), 0, SEEK_CUR);
+  if (Pos < 0) or (FpFtruncate(cint(FHandle), Pos) <> 0) then begin
+    SetLastError(DWORD(fpgeterrno));
     RaiseLastError;
+  end;
 end;
 
 procedure TFile.WriteBuffer(const Buffer; Count: Cardinal);
 var
-  BytesWritten: DWORD;
+  Res: TsSize;
 begin
-  if not WriteFile(FHandle, Buffer, Count, BytesWritten, nil) then
+  repeat
+    Res := FpWrite(cint(FHandle), Buffer, Count);
+  until (Res >= 0) or (fpgeterrno <> ESysEINTR);
+  if Res < 0 then begin
+    SetLastError(DWORD(fpgeterrno));
     RaiseLastError;
-  if BytesWritten <> Count then begin
-    { I'm not aware of any case where WriteFile will return True but a short
-      BytesWritten count. (An out-of-disk-space condition causes False to be
-      returned.) But if that does happen, raise a generic-sounding localized
-      "The system cannot write to the specified device" error. }
-    RaiseError(ERROR_WRITE_FAULT);
   end;
+  if Cardinal(Res) <> Count then
+    RaiseError(ERROR_WRITE_FAULT);
 end;
 
 { TMemoryFile }
@@ -379,13 +380,13 @@ end;
 destructor TMemoryFile.Destroy;
 begin
   if Assigned(FMemory) then
-    LocalFree(HLOCAL(FMemory));
+    FreeMem(FMemory);
   inherited;
 end;
 
 procedure TMemoryFile.AllocMemory(const ASize: Cardinal);
 begin
-  FMemory := Pointer(LocalAlloc(LMEM_FIXED, ASize));
+  FMemory := AllocMem(ASize);
   if FMemory = nil then
     OutOfMemoryError;
   FSize.Lo := ASize;
@@ -423,7 +424,7 @@ function TMemoryFile.Read(var Buffer; Count: Cardinal): Cardinal;
 begin
   Result := ClipCount(Count);
   if Result <> 0 then begin
-    Move(Pointer(Cardinal(FMemory) + FPosition.Lo)^, Buffer, Result);
+    Move(Pointer(PtrUInt(FMemory) + FPosition.Lo)^, Buffer, Result);
     Inc64(FPosition, Result);
   end;
 end;
@@ -440,7 +441,7 @@ begin
   if ClipCount(Count) <> Count then
     RaiseError(ERROR_HANDLE_EOF);
   if Count <> 0 then begin
-    Move(Buffer, Pointer(Cardinal(FMemory) + FPosition.Lo)^, Count);
+    Move(Buffer, Pointer(PtrUInt(FMemory) + FPosition.Lo)^, Count);
     Inc64(FPosition, Count);
   end;
 end;
@@ -471,7 +472,7 @@ begin
  if FCodePage <> 0 then
    SetCodePage(S, FCodePage, False);
  Result := String(S);
-end; 
+end;
 
 function TTextFileReader.ReadAnsiLine: AnsiString;
 begin
@@ -617,89 +618,6 @@ end;
 procedure TTextFileWriter.WriteAnsiLine(const S: AnsiString);
 begin
   WriteAnsi(S + #13#10);
-end;
-
-{ TFileMapping }
-
-type
-  NTSTATUS = Longint;
-var
-  _RtlNtStatusToDosError: function(Status: NTSTATUS): ULONG; stdcall;
-
-constructor TFileMapping.Create(AFile: TFile; AWritable: Boolean);
-const
-  Protect: array[Boolean] of DWORD = (PAGE_READONLY, PAGE_READWRITE);
-  DesiredAccess: array[Boolean] of DWORD = (FILE_MAP_READ, FILE_MAP_WRITE);
-begin
-  inherited Create;
-
-  if not Assigned(_RtlNtStatusToDosError) then
-    _RtlNtStatusToDosError := GetProcAddress(GetModuleHandle('ntdll.dll'),
-      'RtlNtStatusToDosError');
-
-  FMapSize := AFile.CappedSize;
-
-  FMappingHandle := CreateFileMapping(AFile.Handle, nil, Protect[AWritable], 0,
-    FMapSize, nil);
-  if FMappingHandle = 0 then
-    TFile.RaiseLastError;
-
-  FMemory := MapViewOfFile(FMappingHandle, DesiredAccess[AWritable], 0, 0,
-    FMapSize);
-  if FMemory = nil then
-    TFile.RaiseLastError;
-end;
-
-destructor TFileMapping.Destroy;
-begin
-  if Assigned(FMemory) then
-    UnmapViewOfFile(FMemory);
-  if FMappingHandle <> 0 then
-    CloseHandle(FMappingHandle);
-  inherited;
-end;
-
-procedure TFileMapping.Commit;
-{ Flushes modified pages to disk. To avoid silent data loss, this should
-  always be called prior to destroying a writable TFileMapping instance -- but
-  _not_ from a 'finally' section, as this method will raise an exception on
-  failure. }
-begin
-  if not FlushViewOfFile(FMemory, 0) then
-    TFile.RaiseLastError;
-end;
-
-procedure TFileMapping.ReraiseInPageErrorAsFileException;
-{ In Delphi, when an I/O error occurs while accessing a memory-mapped file --
-  known as an "inpage error" -- the user will see an exception message of
-  "External exception C0000006" by default.
-  This method examines the current exception to see if it's an inpage error
-  that occurred while accessing our mapped view, and if so, it raises a new
-  exception of type EFileError with a more friendly and useful message, like
-  you'd see when doing non-memory-mapped I/O with TFile. }
-var
-  E: TObject;
-begin
-  E := ExceptObject;
-  if (E is EExternalException) and
-     (EExternalException(E).ExceptionRecord.ExceptionCode = EXCEPTION_IN_PAGE_ERROR) and
-     (Cardinal(EExternalException(E).ExceptionRecord.NumberParameters) >= Cardinal(2)) and
-     (Cardinal(EExternalException(E).ExceptionRecord.ExceptionInformation[1]) >= Cardinal(FMemory)) and
-     (Cardinal(EExternalException(E).ExceptionRecord.ExceptionInformation[1]) < Cardinal(Cardinal(FMemory) + FMapSize)) then begin
-    { There should be a third parameter containing the NT status code of the error
-      condition that caused the exception. Convert that into a Win32 error code
-      and use it to generate our error message. }
-    if (Cardinal(EExternalException(E).ExceptionRecord.NumberParameters) >= Cardinal(3)) and
-       Assigned(_RtlNtStatusToDosError) then
-      TFile.RaiseError(_RtlNtStatusToDosError(EExternalException(E).ExceptionRecord.ExceptionInformation[2]))
-    else begin
-      { Use generic "The system cannot [read|write] to the specified device" errors }
-      if EExternalException(E).ExceptionRecord.ExceptionInformation[0] = 0 then
-        TFile.RaiseError(ERROR_READ_FAULT)
-      else
-        TFile.RaiseError(ERROR_WRITE_FAULT);
-    end;
-  end;
 end;
 
 end.

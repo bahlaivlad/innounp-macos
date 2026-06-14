@@ -1,3 +1,44 @@
+# innounp — macOS (arm64) port
+
+This is a fork that ports the **`innounp-2` console unpacker** to **native macOS**
+(Apple Silicon / arm64), built with [Free Pascal](https://www.freepascal.org/).
+The upstream project targets 32-bit Delphi on Windows and links x86 object files,
+so it cannot be built on macOS as-is; this fork replaces the Windows-only pieces
+with portable equivalents.
+
+**Scope:** only the `innounp-2` *console* tool is ported. The Windows GUI in this
+repository (`UnpackMain.pas` etc., Delphi VCL) is **not** ported and remains
+Windows-only.
+
+### Build (macOS)
+
+```sh
+cd innounp-2/sources
+./build-macos.sh        # -> build/innounp
+```
+
+Requires `brew install fpc` and the Xcode command line tools (`clang`). See
+[innounp-2/sources/BUILDING-macOS.md](innounp-2/sources/BUILDING-macOS.md) for
+the full description of what the port changes.
+
+### Status
+
+Verified end-to-end against an Inno Setup 6.7 installer (LZMA2): info, `-l`, `-v`,
+`-x` (extract) and `-t` (integrity test) all succeed, with CRC checks passing on
+every file.
+
+### Credits & license
+
+- Upstream console + GUI by **Jürgen Rathlev** — [InnoUnpacker-Windows-GUI](https://github.com/jrathlev/InnoUnpacker-Windows-GUI)
+- Original **innounp** — <https://sourceforge.net/projects/innounp>
+- Inno Setup © Jordan Russell / Martijn Laan; bundled LZMA SDK, bzip2 and zlib
+  retain their respective licenses (see `innounp-2/sources/licenses/`).
+
+Licensed under the MIT License (see [LICENSE](LICENSE)). All upstream copyright
+notices are retained. macOS port changes © 2026 Vladyslav Bahlai.
+
+---
+
 ### Inno Setup Unpacker - Windows GUI v 2.2
 
 #### Inspect and unpack InnoSetup archives

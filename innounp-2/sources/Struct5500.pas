@@ -13,7 +13,7 @@ unit Struct5500;
 interface
 
 uses
-  Windows, Int64Em, SHA1;
+  Winapi.Windows, Int64Em, SHA1;
 
 const
   SetupTitle = 'Inno Setup';

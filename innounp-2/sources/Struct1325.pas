@@ -14,7 +14,7 @@ unit Struct1325;
 interface
 
 uses
-  Windows;
+  Winapi.Windows;
 
 const
   SetupTitle = 'Inno Setup';

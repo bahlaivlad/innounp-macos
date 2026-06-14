@@ -41,14 +41,14 @@ begin
     if Len > 0 then R.Read(S[1], Len);
     if Ver>=6000 then String(P^) := S
     else WideString(P^) := S;
-    Inc(Cardinal(P), SizeOf(Pointer));
+    Inc(PByte(P), SizeOf(Pointer));
   end;
   for I := 1 to NumAnsiStrings do begin
     R.Read(Len, SizeOf(Len));
     SetLength(AnsiS, Len);
     if Len > 0 then R.Read(AnsiS[1], Len);
     AnsiString(P^) := AnsiS;
-    Inc(Cardinal(P), SizeOf(Pointer));
+    Inc(PByte(P), SizeOf(Pointer));
   end;
   R.Read(P^,Count - (Cardinal(NumWideStrings + NumAnsiStrings) * SizeOf(Pointer)));
 end;
@@ -69,7 +69,7 @@ begin
     if Len > 0 then
       R.Read(S[1], Len);
 //    String(P^) := S;
-//    Inc(Cardinal(P), SizeOf(Pointer));
+//    Inc(PByte(P), SizeOf(Pointer));
   end;
   for I := 1 to NumAnsiStrings do begin
     R.Read(Len, SizeOf(Len));
@@ -77,7 +77,7 @@ begin
     if Len > 0 then
       R.Read(AnsiS[1], Len);
 //    AnsiString(P^) := AnsiS;
-//    Inc(Cardinal(P), SizeOf(Pointer));
+//    Inc(PByte(P), SizeOf(Pointer));
   end;
   R.Skip(Count - (Cardinal(NumWideStrings + NumAnsiStrings) * SizeOf(Pointer)));
 end;

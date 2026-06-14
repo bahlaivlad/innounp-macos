@@ -13,7 +13,7 @@ unit Compression.LZMADecompressor;
 interface
 
 uses
-  Windows, SysUtils, Int64Em, Compress;
+  SysUtils, Int64Em, Compress;
 
 type
   TLZMACustomDecompressor = class(TCustomDecompressor)
@@ -24,8 +24,8 @@ type
     FAvailIn: Cardinal;
     FBuffer: array[0..65535] of Byte;
   protected
-    function DecodeToBuf(var Dest; var DestLen: Cardinal; const Src;
-      var SrcLen: Cardinal; var Status: Integer): Integer; virtual; abstract;
+    function DecodeToBuf(var Dest; var DestLen: NativeUInt; const Src;
+      var SrcLen: NativeUInt; var Status: Integer): Integer; virtual; abstract;
     procedure FreeDecoder; virtual; abstract;
     procedure ProcessHeader; virtual; abstract;
   public
@@ -34,16 +34,17 @@ type
     procedure Reset; override;
   end;
 
-  { Internally-used records }
-  TLZMA1InternalDecoderState = array[0..24] of LongWord;
-  TLZMA2InternalDecoderState = array[0..28] of LongWord;
+  { Internally-used records. Sized and aligned to match the C structures
+    CLzmaDec (128 bytes) and CLzma2Dec (144 bytes) on LP64 macOS arm64. }
+  TLZMA1InternalDecoderState = array[0..15] of QWord;
+  TLZMA2InternalDecoderState = array[0..17] of QWord;
 
   TLZMA1Decompressor = class(TLZMACustomDecompressor)
   private
     FDecoderState: TLZMA1InternalDecoderState;
   protected
-    function DecodeToBuf(var Dest; var DestLen: Cardinal; const Src;
-      var SrcLen: Cardinal; var Status: Integer): Integer; override;
+    function DecodeToBuf(var Dest; var DestLen: NativeUInt; const Src;
+      var SrcLen: NativeUInt; var Status: Integer): Integer; override;
     procedure FreeDecoder; override;
     procedure ProcessHeader; override;
   end;
@@ -52,8 +53,8 @@ type
   private
     FDecoderState: TLZMA2InternalDecoderState;
   protected
-    function DecodeToBuf(var Dest; var DestLen: Cardinal; const Src;
-      var SrcLen: Cardinal; var Status: Integer): Integer; override;
+    function DecodeToBuf(var Dest; var DestLen: NativeUInt; const Src;
+      var SrcLen: NativeUInt; var Status: Integer): Integer; override;
     procedure FreeDecoder; override;
     procedure ProcessHeader; override;
   end;
@@ -65,7 +66,7 @@ type
 
   PLZMAISzAlloc = ^TLZMAISzAlloc;
   TLZMAISzAlloc = record
-    Alloc: function(p: PLZMAISzAlloc; size: Cardinal): Pointer; cdecl;
+    Alloc: function(p: PLZMAISzAlloc; size: NativeUInt): Pointer; cdecl;
     Free: procedure(p: PLZMAISzAlloc; address: Pointer); cdecl;
   end;
 
@@ -93,36 +94,33 @@ const
     size the compiler currently allows. }
   MaxDictionarySize = 1024 shl 20;  { 1 GB - same as ssLZMADictionarySize allows in Compile.pas }
 
-{ Compiled by Visual Studio 2022 using compile.bat
-  To enable source debugging recompile using compile-bcc32c.bat
-  Note that in a speed test the code produced by bcc32c was about 33% slower }
-{$L Compression\ISLzmaDec.obj}
+{ macOS/FPC port: compiled from the Inno Setup ISLzmaDec.c sources with
+  clang for arm64 (see lzma2c/build.sh) }
+{$L lzma2c/ISLzmaDec.o}
 
+{ NOTE: the C SDK takes the allocator as a POINTER (ISzAlloc*). It must be
+  declared here as an explicit pointer parameter: a `const record` parameter
+  is passed by value in registers under the arm64 AAPCS, which the C side
+  would misinterpret as the pointer itself. }
 function IS_LzmaDec_Init(var state: TLZMA1InternalDecoderState;
-  stateSize: Cardinal; const props; propsSize: Cardinal;
-  const alloc: TLZMAISzAlloc): TLZMASRes; cdecl; external name '_IS_LzmaDec_Init';
-function IS_LzmaDec_StateSize: Cardinal; cdecl; external name '_IS_LzmaDec_StateSize';
+  stateSize: NativeUInt; const props; propsSize: Cardinal;
+  alloc: PLZMAISzAlloc): TLZMASRes; cdecl; external name 'IS_LzmaDec_Init';
+function IS_LzmaDec_StateSize: NativeUInt; cdecl; external name 'IS_LzmaDec_StateSize';
 function LzmaDec_DecodeToBuf(var state: TLZMA1InternalDecoderState; var dest;
-  var destLen: Cardinal; const src; var srcLen: Cardinal; finishMode: Integer;
-  var status: Integer): TLZMASRes; cdecl; external name '_LzmaDec_DecodeToBuf';
+  var destLen: NativeUInt; const src; var srcLen: NativeUInt; finishMode: Integer;
+  var status: Integer): TLZMASRes; cdecl; external name 'LzmaDec_DecodeToBuf';
 procedure LzmaDec_Free(var state: TLZMA1InternalDecoderState;
-  const alloc: TLZMAISzAlloc); cdecl; external name '_LzmaDec_Free';
+  alloc: PLZMAISzAlloc); cdecl; external name 'LzmaDec_Free';
 
 function IS_Lzma2Dec_Init(var state: TLZMA2InternalDecoderState;
-  stateSize: Cardinal; prop: Byte; const alloc: TLZMAISzAlloc): TLZMASRes; cdecl;
-  external name '_IS_Lzma2Dec_Init';
-function IS_Lzma2Dec_StateSize: Cardinal; cdecl; external name '_IS_Lzma2Dec_StateSize';
+  stateSize: NativeUInt; prop: Byte; alloc: PLZMAISzAlloc): TLZMASRes; cdecl;
+  external name 'IS_Lzma2Dec_Init';
+function IS_Lzma2Dec_StateSize: NativeUInt; cdecl; external name 'IS_Lzma2Dec_StateSize';
 function Lzma2Dec_DecodeToBuf(var state: TLZMA2InternalDecoderState; var dest;
-  var destLen: Cardinal; const src; var srcLen: Cardinal; finishMode: Integer;
-  var status: Integer): TLZMASRes; cdecl; external name '_Lzma2Dec_DecodeToBuf';
+  var destLen: NativeUInt; const src; var srcLen: NativeUInt; finishMode: Integer;
+  var status: Integer): TLZMASRes; cdecl; external name 'Lzma2Dec_DecodeToBuf';
 procedure IS_Lzma2Dec_Free(var state: TLZMA2InternalDecoderState;
-  const alloc: TLZMAISzAlloc); cdecl; external name '_IS_Lzma2Dec_Free';
-
-function _memcpy(dest, src: Pointer; n: Cardinal): Pointer; cdecl;
-begin
-  Move(src^, dest^, n);
-  Result := dest;
-end;
+  alloc: PLZMAISzAlloc); cdecl; external name 'IS_Lzma2Dec_Free';
 
 procedure LZMADecompInternalError(const Msg: String);
 begin
@@ -134,10 +132,10 @@ begin
   raise ECompressDataError.CreateFmt(SLZMADecompDataError, [Id]);
 end;
 
-function LZMAAllocFunc(p: PLZMAISzAlloc; size: Cardinal): Pointer; cdecl;
+function LZMAAllocFunc(p: PLZMAISzAlloc; size: NativeUInt): Pointer; cdecl;
 begin
-  if (size <> 0) and (size <= Cardinal(MaxDictionarySize)) then
-    Result := VirtualAlloc(nil, size, MEM_COMMIT, PAGE_READWRITE)
+  if (size <> 0) and (size <= NativeUInt(MaxDictionarySize)) then
+    Result := AllocMem(size)
   else
     Result := nil;
 end;
@@ -145,7 +143,7 @@ end;
 procedure LZMAFreeFunc(p: PLZMAISzAlloc; address: Pointer); cdecl;
 begin
   if Assigned(address) then
-    VirtualFree(address, 0, MEM_RELEASE);
+    FreeMem(address);
 end;
 
 const
@@ -163,7 +161,7 @@ procedure TLZMACustomDecompressor.DecompressInto(var Buffer; Count: Longint);
 var
   NextOut: ^Byte;
   AvailOut: Longint;
-  OutBytes, InBytes: Cardinal;
+  OutBytes, InBytes: NativeUInt;
   Code: TLZMASRes;
   DecodeStatus: Integer;
 begin
@@ -216,13 +214,13 @@ end;
 
 procedure TLZMA1Decompressor.FreeDecoder;
 begin
-  LzmaDec_Free(FDecoderState, LZMAAlloc);
+  LzmaDec_Free(FDecoderState, @LZMAAlloc);
 end;
 
 procedure TLZMA1Decompressor.ProcessHeader;
 var
-  StateSize : cardinal;
-  DecoderStateSize : integer;
+  StateSize : NativeUInt;
+  DecoderStateSize : NativeUInt;
 var
   Props: packed record  { size = LZMA_PROPS_SIZE (5) }
     Misc: Byte;
@@ -239,12 +237,12 @@ begin
   StateSize := IS_LzmaDec_StateSize;
   DecoderStateSize := SizeOf(FDecoderState);
   if StateSize <> DecoderStateSize then
-    LZMADecompDataError(-StateSize);
+    LZMADecompDataError(-Integer(StateSize));
 
   { Note: IS_LzmaDec_Init will re-use already-allocated memory if it can.
     FDecoderState is assumed to be initialized to zero on the first call. }
   case IS_LzmaDec_Init(FDecoderState, DecoderStateSize, Props,
-     SizeOf(Props), LZMAAlloc) of
+     SizeOf(Props), @LZMAAlloc) of
     SZ_OK: ;
     SZ_ERROR_MEM: OutOfMemoryError;
   else
@@ -253,8 +251,8 @@ begin
   end;
 end;
 
-function TLZMA1Decompressor.DecodeToBuf(var Dest; var DestLen: Cardinal;
-  const Src; var SrcLen: Cardinal; var Status: Integer): Integer;
+function TLZMA1Decompressor.DecodeToBuf(var Dest; var DestLen: NativeUInt;
+  const Src; var SrcLen: NativeUInt; var Status: Integer): Integer;
 begin
   Result := LzmaDec_DecodeToBuf(FDecoderState, Dest, DestLen, Src, SrcLen,
     LZMA_FINISH_ANY, Status);
@@ -264,7 +262,7 @@ end;
 
 procedure TLZMA2Decompressor.FreeDecoder;
 begin
-  IS_Lzma2Dec_Free(FDecoderState, LZMAAlloc);
+  IS_Lzma2Dec_Free(FDecoderState, @LZMAAlloc);
 end;
 
 procedure TLZMA2Decompressor.ProcessHeader;
@@ -277,8 +275,8 @@ procedure TLZMA2Decompressor.ProcessHeader;
 
 var
   Prop: Byte;
-  StateSize : cardinal;
-  DecoderStateSize : integer;
+  StateSize : NativeUInt;
+  DecoderStateSize : NativeUInt;
 begin
   { Read header fields }
   if ReadProc(Prop, SizeOf(Prop)) <> SizeOf(Prop) then
@@ -291,12 +289,12 @@ begin
   StateSize := IS_Lzma2Dec_StateSize;
   DecoderStateSize := SizeOf(FDecoderState);
   if StateSize <> DecoderStateSize then
-    LZMADecompDataError(-StateSize);
+    LZMADecompDataError(-Integer(StateSize));
 
   { Note: IS_Lzma2Dec_Init will re-use already-allocated memory if it can.
     FDecoderState is assumed to be initialized to zero on the first call. }
   case IS_Lzma2Dec_Init(FDecoderState, DecoderStateSize, Prop,
-     LZMAAlloc) of
+     @LZMAAlloc) of
     SZ_OK: ;
     SZ_ERROR_MEM: OutOfMemoryError;
   else
@@ -305,8 +303,8 @@ begin
   end;
 end;
 
-function TLZMA2Decompressor.DecodeToBuf(var Dest; var DestLen: Cardinal;
-  const Src; var SrcLen: Cardinal; var Status: Integer): Integer;
+function TLZMA2Decompressor.DecodeToBuf(var Dest; var DestLen: NativeUInt;
+  const Src; var SrcLen: NativeUInt; var Status: Integer): Integer;
 begin
   Result := Lzma2Dec_DecodeToBuf(FDecoderState, Dest, DestLen, Src, SrcLen,
     LZMA_FINISH_ANY, Status);

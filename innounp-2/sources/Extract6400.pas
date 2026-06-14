@@ -14,7 +14,7 @@ unit Extract6400;
 interface
 
 uses
-  Windows, SysUtils, Int64Em, FileClass, Compress, Struct, ChaCha20, Extract, MyTypes;
+  Winapi.Windows, SysUtils, Int64Em, FileClass, Compress, Struct, ChaCha20, Extract, MyTypes;
 
 type
   TFileExtractor6400 = class (TFileExtractor)
@@ -206,7 +206,7 @@ begin
       Break
     else begin
       Dec(Left, Res);
-      Inc(Longint(Buffer), Res);
+      Inc(PByte(Buffer), Res);
       { Go to next disk }
       if FOpenedSlice >= FChunkLastSlice then
         { Already on the last slice, so the file must be corrupted... }

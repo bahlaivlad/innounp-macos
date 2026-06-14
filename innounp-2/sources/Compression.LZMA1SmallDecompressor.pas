@@ -13,7 +13,7 @@ unit Compression.LZMA1SmallDecompressor;
 interface
 
 uses
-  Windows, SysUtils, Compress, Int64Em;
+  SysUtils, Compress, Int64Em;
 
 type
   { Internally-used record }
@@ -80,7 +80,9 @@ end;
 
 { TLZMA1SmallDecompressor }
 
-{$L Compression\LzmaDecodeInno.obj}
+{ macOS/FPC port: compiled from the Inno Setup LzmaDecodeInno.c sources
+  with clang for arm64 (see lzma2c/build.sh) }
+{$L lzma2c/LzmaDecodeInno.o}
 
 type
   TLzmaInCallback = record
@@ -95,12 +97,12 @@ const
 
 function LzmaMyDecodeProperties(var vs: TLZMAInternalDecoderState;
   vsSize: Integer; const propsData; propsDataSize: Integer;
-  var outPropsSize: LongWord; var outDictionarySize: LongWord): Integer; cdecl; external name '_LzmaMyDecodeProperties';
+  var outPropsSize: LongWord; var outDictionarySize: LongWord): Integer; cdecl; external name 'LzmaMyDecodeProperties';
 procedure LzmaMyDecoderInit(var vs: TLZMAInternalDecoderState;
-  probsPtr: Pointer; dictionaryPtr: Pointer); cdecl; external name '_LzmaMyDecoderInit';
+  probsPtr: Pointer; dictionaryPtr: Pointer); cdecl; external name 'LzmaMyDecoderInit';
 function LzmaDecode(var vs: TLZMAInternalDecoderState;
   var inCallback: TLzmaInCallback; var outStream; outSize: Cardinal;
-  var outSizeProcessed: Cardinal): Integer; cdecl; external name '_LzmaDecode';
+  var outSizeProcessed: Cardinal): Integer; cdecl; external name 'LzmaDecode';
 
 type
   TLZMADecompressorCallbackData = record
@@ -126,7 +128,7 @@ procedure TLZMA1SmallDecompressor.DestroyHeap;
 begin
   FHeapSize := 0;
   if Assigned(FHeapBase) then begin
-    VirtualFree(FHeapBase, 0, MEM_RELEASE);
+    FreeMem(FHeapBase);
     FHeapBase := nil;
   end;
 end;
@@ -166,12 +168,12 @@ begin
   NewHeapSize := ProbsSize + DictionarySize;
   if FHeapSize <> NewHeapSize then begin
     DestroyHeap;
-    FHeapBase := VirtualAlloc(nil, NewHeapSize, MEM_COMMIT, PAGE_READWRITE);
+    FHeapBase := AllocMem(NewHeapSize);
     if FHeapBase = nil then
       OutOfMemoryError;
     FHeapSize := NewHeapSize;
   end;
-  LzmaMyDecoderInit(FDecoderState, FHeapBase, Pointer(Cardinal(FHeapBase) + ProbsSize));
+  LzmaMyDecoderInit(FDecoderState, FHeapBase, Pointer(PtrUInt(FHeapBase) + ProbsSize));
 
   FHeaderProcessed := True;
 end;

@@ -19,7 +19,7 @@ procedure Win32ErrorMsg(const FunctionName: String);
 implementation
 
 uses
-  Winapi.Windows, System.SysUtils, PathFunc, CmnFunc2, Msgs, MsgIDs;
+  Winapi.Windows, SysUtils, PathFunc, CmnFunc2, Msgs, MsgIDs;
 
 procedure Win32ErrorMsg(const FunctionName: String);
 var

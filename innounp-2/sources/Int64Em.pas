@@ -8,6 +8,9 @@ unit Int64Em;
 
   Declaration of the Integer64 type - which represents an *unsigned* 64-bit
   integer value - and functions for manipulating Integer64's.
+
+  macOS/FPC port: the original x86 assembly implementations were replaced
+  by portable pure-Pascal code using native 64-bit unsigned arithmetic.
 }
 
 interface
@@ -35,152 +38,99 @@ implementation
 uses
   SysUtils;
 
+function ToQWord(const X: Integer64): QWord; inline;
+begin
+  Result := (QWord(X.Hi) shl 32) or X.Lo;
+end;
+
+procedure FromQWord(const V: QWord; var X: Integer64); inline;
+begin
+  X.Lo := LongWord(V and $FFFFFFFF);
+  X.Hi := LongWord(V shr 32);
+end;
+
 function Compare64(const N1, N2: Integer64): Integer;
 { If N1 = N2, returns 0.
   If N1 > N2, returns 1.
   If N1 < N2, returns -1. }
-asm
-  { Compare high words }
-  mov  ecx, [eax+4]
-  cmp  ecx, [edx+4]
-  ja   @@return1
-  jb   @@returnminus1
-  { High words equal; compare low words }
-  mov  ecx, [eax]
-  cmp  ecx, [edx]
-  ja   @@return1
-  jb   @@returnminus1
-  jmp  @@return0
-@@return1:
-  xor  eax, eax
-  inc  eax
-  jmp  @@exit
-@@returnminus1:
-  or   eax, -1
-  jmp  @@exit
-@@return0:
-  xor  eax,eax
-@@exit:
+var
+  A, B: QWord;
+begin
+  A := ToQWord(N1);
+  B := ToQWord(N2);
+  if A > B then
+    Result := 1
+  else if A < B then
+    Result := -1
+  else
+    Result := 0;
 end;
 
 procedure Dec64(var X: Integer64; N: LongWord);
-asm
-  sub  [eax], edx
-  sbb  dword ptr [eax+4], 0
+begin
+  FromQWord(ToQWord(X) - N, X);
 end;
 
 procedure Dec6464(var X: Integer64; const N: Integer64);
-asm
-  mov  ecx, [edx]
-  sub  [eax], ecx
-  mov  ecx, [edx+4]
-  sbb  [eax+4], ecx
+begin
+  FromQWord(ToQWord(X) - ToQWord(N), X);
 end;
 
 function Inc64(var X: Integer64; N: LongWord): Boolean;
 { Adds N to X. In case of overflow, False is returned. }
-asm
-  add  [eax], edx
-  adc  dword ptr [eax+4], 0
-  setnc al
+var
+  V: QWord;
+begin
+  V := ToQWord(X);
+  Result := N <= High(QWord) - V;
+  FromQWord(V + N, X);
 end;
 
 function Inc6464(var X: Integer64; const N: Integer64): Boolean;
 { Adds N to X. In case of overflow, False is returned. }
-asm
-  mov  ecx, [edx]
-  add  [eax], ecx
-  mov  ecx, [edx+4]
-  adc  [eax+4], ecx
-  setnc al
+var
+  V, W: QWord;
+begin
+  V := ToQWord(X);
+  W := ToQWord(N);
+  Result := W <= High(QWord) - V;
+  FromQWord(V + W, X);
 end;
 
 procedure Multiply32x32to64(N1, N2: LongWord; var X: Integer64);
 { Multiplies two 32-bit unsigned integers together and places the result
   in X. }
-asm
-  mul  edx    { Multiplies EAX by EDX, places 64-bit result in EDX:EAX }
-  mov  [ecx], eax
-  mov  [ecx+4], edx
+begin
+  FromQWord(QWord(N1) * N2, X);
 end;
 
 function Mul64(var X: Integer64; N: LongWord): Boolean;
 { Multiplies X by N, and overwrites X with the result. In case of overflow,
   False is returned (X is valid but truncated to 64 bits). }
-asm
-  push esi
-  push ebx
-  mov  esi, eax
-  mov  ecx, edx
-
-  { Multiply high part }
-  mov  eax, [esi+4]
-  mul  ecx            { CF set if resulting EDX <> 0 }
-  setnc bl
-  mov  [esi+4], eax
-
-  { Multiply low part, carry to high part }
-  mov  eax, [esi]
-  mul  ecx
-  mov  [esi], eax
-  add  [esi+4], edx   { CF set on overflow }
-  setnc al
-  and  al, bl
-
-  pop  ebx
-  pop  esi
+var
+  V: QWord;
+begin
+  V := ToQWord(X);
+  Result := (N = 0) or (V <= High(QWord) div N);
+  FromQWord(V * N, X);
 end;
 
 function Div64(var X: Integer64; const Divisor: LongWord): LongWord;
 { Divides X by Divisor, and overwrites X with the quotient. Returns the
   remainder. }
-asm
-  push ebx
-  push esi
-  mov  esi, eax
-  mov  ecx, edx
-
-  mov  eax, [esi]
-  mov  ebx, [esi+4]
-
-  { Divide EBX:EAX by ECX. Quotient is stored in EBX:EAX, remainder in EDX. }
-  xchg eax, ebx
-  xor  edx, edx
-  div  ecx
-  xchg eax, ebx
-  div  ecx
-
-  mov  [esi], eax
-  mov  [esi+4], ebx
-  mov  eax, edx
-
-  pop  esi
-  pop  ebx
+var
+  V: QWord;
+begin
+  V := ToQWord(X);
+  Result := LongWord(V mod Divisor);
+  FromQWord(V div Divisor, X);
 end;
 
 function Mod64(const X: Integer64; const Divisor: LongWord): LongWord;
 { Divides X by Divisor and returns the remainder. Unlike Div64, X is left
   intact. }
-asm
-  push ebx
-  push esi
-  mov  esi, eax
-  mov  ecx, edx
-
-  mov  eax, [esi]
-  mov  ebx, [esi+4]
-
-  { Divide EBX:EAX by ECX. Quotient is stored in EBX:EAX, remainder in EDX. }
-  xchg eax, ebx
-  xor  edx, edx
-  div  ecx
-  xchg eax, ebx
-  div  ecx
-
-  mov  eax, edx
-
-  pop  esi
-  pop  ebx
+begin
+  Result := LongWord(ToQWord(X) mod Divisor);
 end;
 
 function StrToInteger64(const S: String; var X: Integer64): Boolean;

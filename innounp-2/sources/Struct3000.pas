@@ -15,7 +15,7 @@ unit Struct3000;
 interface
 
 uses
-  Windows;
+  Winapi.Windows;
 
 const
   SetupTitle = 'Inno Setup';

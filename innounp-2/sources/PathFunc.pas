@@ -49,7 +49,7 @@ const
 implementation
 
 uses
-  Winapi.Windows, System.SysUtils;
+  Winapi.Windows, SysUtils;
 
 function AddBackslash(const S: String): String;
 { Returns S plus a trailing backslash, unless S is an empty string or already

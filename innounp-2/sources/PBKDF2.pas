@@ -14,7 +14,7 @@ unit PBKDF2;
 interface
 
 uses
-  System.SysUtils;
+  SysUtils;
 
 function PBKDF2SHA256(Password: TBytes; const Salt: TBytes; const Iterations, KeyLength: Integer): TBytes; overload;
 function PBKDF2SHA256(const Password: String; const Salt: TBytes; const Iterations, KeyLength: Integer): TBytes; overload;
@@ -22,7 +22,7 @@ function PBKDF2SHA256(const Password: String; const Salt: TBytes; const Iteratio
 implementation
 
 uses
-  System.Hash, System.Math;
+  HashCompat, Math;
 
 function PBKDF2SHA256(Password: TBytes; const Salt: TBytes; const Iterations, KeyLength: Integer): TBytes;
 var

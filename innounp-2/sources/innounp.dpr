@@ -63,10 +63,10 @@ program innounp;
 
 uses
   Winapi.Windows,
-  System.SysUtils,
-  System.Classes,
-  System.StrUtils,
-  System.Math,
+  SysUtils,
+  Classes,
+  StrUtils,
+  Math,
   MyTypes in 'MyTypes.pas',
   StructJoin in 'StructJoin.pas',
   Struct in 'Struct.pas',
@@ -88,7 +88,7 @@ uses
   Compress in 'Compress.pas',
   Compress67 in 'Compress67.pas',
   RebuildScript in 'RebuildScript.pas',
-  FileClass in 'FileClass.pas',
+  FileClass in 'posix/FileClass.pas',
   CallOptimizer in 'CallOptimizer.pas',
   FileNull in 'FileNull.pas',
   SetupLdr in 'SetupLdr.pas',
@@ -96,8 +96,10 @@ uses
 {$I CompressList.inc}
   ;
 
+{$IFDEF MSWINDOWS}
 {$R innounp.res}
 {$R version.res}
+{$ENDIF}
 
 const
 {$I VersionInfo.inc}
@@ -742,6 +744,11 @@ begin
 
   CurFileLocation := PSetupFileLocationEntry(Entries[seFileLocation][CurFile^.LocationEntry]);
   DestFile:=CurFile^.SourceFileName;
+{$IFNDEF MSWINDOWS}
+  { Inno Setup stores Windows-style paths; translate to the native separator
+    so files are extracted into a real directory tree on POSIX. }
+  DestFile:=StringReplace(DestFile, '\', PathDelim, [rfReplaceAll]);
+{$ENDIF}
 
   if length(BaseDirToStrip)>0 then delete(DestFile,1,length(BaseDirToStrip));
   if StripPaths then DestFile:=ExtractFileName(DestFile);
@@ -1075,7 +1082,7 @@ begin
 // main program
 var
   i,n,ml : integer;
-  systime   : TSystemTime;
+  systime   : Winapi.Windows.TSystemTime;
   TimeStamp : TFileTime;
   loc       : PSetupFileLocationEntry;
   ReconstructedScript : AnsiString;
@@ -1240,7 +1247,7 @@ begin
                 else TimeStamp:=loc^.TimeStamp;
                 FileTimeToSystemTime(TimeStamp, systime);
                 str(loc^.OriginalSize:10,s);
-                WriteNormalLine(s+'  '+ExtSp(DateTimeString(SystemTimeToDateTime(systime)),19)+
+                WriteNormalLine(s+'  '+ExtSp(DateTimeString(Winapi.Windows.SystemTimeToDateTime(systime)),19)+
                   '  ',ApplyCodepage(SourceFileName));
               end;
             WriteNormalLine('-------------------------------------------------');

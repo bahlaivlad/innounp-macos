@@ -15,7 +15,7 @@ unit Struct4010;
 interface
 
 uses
-  Windows, Int64Em;
+  Winapi.Windows, Int64Em;
 
 const
   SetupTitle = 'Inno Setup';

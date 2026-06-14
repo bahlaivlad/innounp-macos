@@ -12,7 +12,7 @@ procedure AddEmbeddedFiles;
 
 implementation
 
-uses Winapi.Windows, System.SysUtils, System.Classes, Main, PathFunc, MD5, SHA1, Struct;
+uses Winapi.Windows, SysUtils, Classes, Main, PathFunc, MD5, SHA1, Struct;
 
 type
   TScriptBuilder = class
@@ -63,7 +63,7 @@ begin
       Dec (Digits);
       Minor := Minor div 10;
     end;
-    FmtStr (Result, '%d.%.*d', [Major, Digits, Minor]);
+    Result := Format('%d.%.*d', [Major, Digits, Minor]);
     if Build <> 0 then
       Result := Result + Format('.%d', [Build]);
     if ServicePack <> 0 then begin

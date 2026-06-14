@@ -16,8 +16,8 @@ procedure RenameFiles(ExtractAllCopies: Boolean);
 
 implementation
 
-uses Winapi.Windows, System.Classes, System.SysUtils, System.StrUtils,
-  Main, Msgs, MyTypes, SetupEnt, PathFunc;
+uses Winapi.Windows, Classes, SysUtils, StrUtils,
+  Main, Msgs, MyTypes, SetupEnt, PathFunc, PEResource;
 
 procedure SetupCorruptError;
 begin
@@ -30,45 +30,30 @@ begin
   if OffsetTable.TableCRCUsed and
      (GetCRC32(RawOffsetTable^, OffsetTableSize-sizeof(OffsetTable.TableCRC)) <> OffsetTable.TableCRC)
     then SetupCorruptError;
-  if (longword(SourceF.Size) < longword(OffsetTable.TotalSize)) then SetupCorruptError;
+  if Int64(SourceF.Size) < Int64(OffsetTable.TotalSize) then SetupCorruptError;
   Result:=true;
 end;
 
 function GetSetupLdrOffsetTableFromResource(Filename:string; SourceF:TFile; var OffsetTable:TSetupLdrOffsetTable): boolean;
 var
-  hMod: HMODULE;
-  Rsrc: HRSRC;
-  ResData: HGLOBAL;
-  p : pbytearray; //pointer;
+  ResData : TBytes;
   id : TIdArray;
   v : cardinal;
   VerObject: TInnoVer;
 begin
+  { POSIX port: read the RT_RCDATA resource directly from the PE image
+    instead of going through the Windows loader }
   Result:=false;
-  hMod := LoadLibraryEx(PChar(Filename), 0, LOAD_LIBRARY_AS_DATAFILE);
-
-  // Loading very large files in datafile mode requires a lot of memory
-  // And can sometimes fail if system memory is not very large.
-  // If this is the case then let's try to load file a regular module
-  if (hMod = 0) and (GetLastError() = ERROR_NOT_ENOUGH_MEMORY) then
-    hMod := LoadLibraryEx(PChar(Filename), 0, 0);
-
-  if hMod=0 then exit;
-  repeat
-    Rsrc := FindResource(hMod, MAKEINTRESOURCE(SetupLdrOffsetTableResID), RT_RCDATA);
-    if Rsrc = 0 then break;
-    ResData := LoadResource(hMod, Rsrc);
-    if ResData = 0 then break;
-    p := LockResource(ResData);
-    if p = nil then break;
-    move(p^[0],id[1],12);
-    move(p^[12],v,4);
-    Result := GetVersionBySetupId(Id,v,VerObject);
-    if not Result then break;
-    VerObject.UnifySetupLdrOffsetTable(p^, OffsetTable);
-    Result:=CheckCrc(SourceF, p, OffsetTable, VerObject.OfsTabSize);
-  until true;
-  FreeLibrary(hMod);
+  if not LoadPEResource(Filename, PE_RT_RCDATA, SetupLdrOffsetTableResID, ResData) then
+    exit;
+  if length(ResData) < 16 then exit;
+  move(ResData[0],id[1],12);
+  move(ResData[12],v,4);
+  Result := GetVersionBySetupId(Id,v,VerObject);
+  if not Result then exit;
+  if length(ResData) < VerObject.OfsTabSize then exit;
+  VerObject.UnifySetupLdrOffsetTable(ResData[0], OffsetTable);
+  Result:=CheckCrc(SourceF, @ResData[0], OffsetTable, VerObject.OfsTabSize);
 end;
 
 function GetSetupLdrOffsetTableFromFile(SourceF:TFile; var OffsetTable:TSetupLdrOffsetTable): boolean;
@@ -192,7 +177,7 @@ begin
       DestDir := PathExtractPath(DestName); SourceFileName:=DestName;
       DestName := PathExtractName(DestName);
       for t:=1 to length(SourceFileName) do                        // '/' and '\' are valid since
-      // allow ´',' as valid character - JR June 2025
+      // allow ï¿½',' as valid character - JR June 2025
         if SourceFileName[t] in [':','*','?','"','<','>','|'] then // they work as path delimiters
 //        if SourceFileName[t] in [',',':','*','?','"','<','>','|'] then // they work as path delimiters
           SourceFileName[t]:='_';                                  // even inside brace constants

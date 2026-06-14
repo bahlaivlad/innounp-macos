@@ -14,7 +14,7 @@ unit Compress;
 interface
 
 uses
-  System.SysUtils, Int64Em, FileClass;
+  SysUtils, Int64Em, FileClass;
 
 const
   SStoredDataError = 'Unexpected end of stream';
@@ -126,7 +126,7 @@ begin
   end;
   P := @Buf;
   while BufSize <> 0 do begin
-    CurCRC := CRC32Table[Lo(CurCRC) xor P^] xor (CurCRC shr 8);
+    CurCRC := CRC32Table[(CurCRC and $FF) xor P^] xor (CurCRC shr 8);
     Dec(BufSize);
     Inc(P);
   end;
@@ -322,15 +322,15 @@ begin
   ABuf:=@ABuffer;
   if CurPos<BufSize then begin // read from the buffer
     t:=BufSize-CurPos; if t>Count then t:=Count;
-    Move(pointer(cardinal(FBuffer)+CurPos)^,ABuf^,t);
-    Inc(cardinal(ABuf),t); Dec(Count,t);
+    Move(pointer(PtrUInt(FBuffer)+CurPos)^,ABuf^,t);
+    ABuf:=pointer(PtrUInt(ABuf)+t); Dec(Count,t);
     Inc(CurPos,t);
   end;
   if Count>0 then begin // read from the underlying object
     FBlockReader.Read(ABuf^,Count);
     if FCacheEnabled then begin // append the read bytes to the buffer
       if BufSize+Count>BufCapacity then SetCapacity(BufSize+Count);
-      Move(ABuf^,pointer(cardinal(FBuffer)+CurPos)^,Count);
+      Move(ABuf^,pointer(PtrUInt(FBuffer)+CurPos)^,Count);
       Inc(BufSize,Count); Inc(CurPos,Count);
     end;
   end;

@@ -27,7 +27,7 @@ function Win32ErrorString(ErrorCode: Integer): String;
 implementation
 
 uses
-  Winapi.Windows, System.SysUtils, PathFunc;
+  Winapi.Windows, SysUtils, PathFunc;
 
 function InternalGetFileAttr(const Name: String): Integer;
 begin
@@ -143,18 +143,9 @@ begin
 end;
 
 function Win32ErrorString(ErrorCode: Integer): String;
-{ Like SysErrorMessage but also passes the FORMAT_MESSAGE_IGNORE_INSERTS flag
-  which allows the function to succeed on errors like 129 }
-var
-  Len: Integer;
-  Buffer: array[0..1023] of Char;
+{ POSIX port: error codes are errno values, so use the system message text }
 begin
-  Len := FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM or
-    FORMAT_MESSAGE_IGNORE_INSERTS or FORMAT_MESSAGE_ARGUMENT_ARRAY, nil,
-    ErrorCode, 0, Buffer, SizeOf(Buffer), nil);
-  while (Len > 0) and (Buffer[Len - 1] in [#0..#32, '.']) do
-    Dec(Len);
-  SetString(Result, Buffer, Len);
+  Result := SysErrorMessage(ErrorCode);
 end;
 
 end.

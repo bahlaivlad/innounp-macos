@@ -14,24 +14,26 @@ unit bzlib;
 interface
 
 uses
-  Winapi.Windows, System.SysUtils, Compress;
+  SysUtils, Compress;
 
-function BZInitCompressFunctions(Module: HMODULE): Boolean;
-function BZInitDecompressFunctions(Module: HMODULE): Boolean;
+function BZInitCompressFunctions(Module: PtrUInt): Boolean;
+function BZInitDecompressFunctions(Module: PtrUInt): Boolean;
 
 type
-  TBZAlloc = function(AppData: Pointer; Items, Size: Cardinal): Pointer; stdcall;
-  TBZFree = procedure(AppData, Block: Pointer); stdcall;
+  TBZAlloc = function(AppData: Pointer; Items, Size: Integer): Pointer; cdecl;
+  TBZFree = procedure(AppData, Block: Pointer); cdecl;
+  { Matches the C bz_stream layout on LP64 (macOS arm64) }
+{$PACKRECORDS C}
   TBZStreamRec = record
-    next_in: PChar;
-    avail_in: Integer;
-    total_in: Integer;
-    total_in_hi: Integer;
+    next_in: PByte;
+    avail_in: Cardinal;
+    total_in: Cardinal;
+    total_in_hi: Cardinal;
 
-    next_out: PChar;
-    avail_out: Integer;
-    total_out: Integer;
-    total_out_hi: Integer;
+    next_out: PByte;
+    avail_out: Cardinal;
+    total_out: Cardinal;
+    total_out_hi: Cardinal;
 
     State: Pointer;
 
@@ -39,6 +41,7 @@ type
     zfree: TBZFree;
     AppData: Pointer;
   end;
+{$PACKRECORDS DEFAULT}
 
   TBZDecompressor = class(TCustomDecompressor)
   private
@@ -56,28 +59,23 @@ type
   end;
 
   function BZ2_bzDecompressInit(var strm: TBZStreamRec;
-    verbosity, small: Integer): Integer; stdcall;
-  function BZ2_bzDecompress(var strm: TBZStreamRec): Integer; stdcall;
-  function BZ2_bzDecompressEnd(var strm: TBZStreamRec): Integer; stdcall;
+    verbosity, small: Integer): Integer; cdecl;
+  function BZ2_bzDecompress(var strm: TBZStreamRec): Integer; cdecl;
+  function BZ2_bzDecompressEnd(var strm: TBZStreamRec): Integer; cdecl;
 
 implementation
-{$L bzip\bzlib.obj}
-{$L bzip\crctable.obj}
-{$L bzip\decompress.obj}
-{$L bzip\huffman.obj}
-{$L bzip\randtable.obj}
+
+{ macOS/FPC port: the statically linked x86 bzip2 objects were replaced by
+  calls into the system libbz2 library. }
+
+const
+{$LINKLIB bz2}
+  libbz2 = 'bz2';
 
   function BZ2_bzDecompressInit(var strm: TBZStreamRec;
-    verbosity, small: Integer): Integer; stdcall; external;
-  function BZ2_bzDecompress(var strm: TBZStreamRec): Integer; stdcall; external;
-  function BZ2_bzDecompressEnd(var strm: TBZStreamRec): Integer; stdcall; external;
-
-var
-  BZ2_bzCompressInit: function(var strm: TBZStreamRec;
-    blockSize100k, verbosity, workFactor: Integer): Integer; stdcall;
-  BZ2_bzCompress: function(var strm: TBZStreamRec;
-    action: Integer): Integer; stdcall;
-  BZ2_bzCompressEnd: function(var strm: TBZStreamRec): Integer; stdcall;
+    verbosity, small: Integer): Integer; cdecl; external libbz2 name 'BZ2_bzDecompressInit';
+  function BZ2_bzDecompress(var strm: TBZStreamRec): Integer; cdecl; external libbz2 name 'BZ2_bzDecompress';
+  function BZ2_bzDecompressEnd(var strm: TBZStreamRec): Integer; cdecl; external libbz2 name 'BZ2_bzDecompressEnd';
 
 {  BZ2_bzDecompressInit: function(var strm: TBZStreamRec;
     verbosity, small: Integer): Integer; stdcall;
@@ -108,25 +106,14 @@ const
   SBzlibInternalError = 'bzlib: Internal error. Code %d';
   SBzlibAllocError = 'bzlib: Too much memory requested';
 
-procedure bz_internal_error(code:integer); stdcall;
+
+function BZInitCompressFunctions(Module: PtrUInt): Boolean;
 begin
+  { Compression is not used by innounp }
+  Result := False;
 end;
 
-function BZInitCompressFunctions(Module: HMODULE): Boolean;
-begin
-  BZ2_bzCompressInit := GetProcAddress(Module, 'BZ2_bzCompressInit');
-  BZ2_bzCompress := GetProcAddress(Module, 'BZ2_bzCompress');
-  BZ2_bzCompressEnd := GetProcAddress(Module, 'BZ2_bzCompressEnd');
-  Result := Assigned(BZ2_bzCompressInit) and Assigned(BZ2_bzCompress) and
-    Assigned(BZ2_bzCompressEnd);
-  if not Result then begin
-    BZ2_bzCompressInit := nil;
-    BZ2_bzCompress := nil;
-    BZ2_bzCompressEnd := nil;
-  end;
-end;
-
-function BZInitDecompressFunctions(Module: HMODULE): Boolean;
+function BZInitDecompressFunctions(Module: PtrUInt): Boolean;
 begin
 {  BZ2_bzDecompressInit := GetProcAddress(Module, 'BZ2_bzDecompressInit');
   BZ2_bzDecompress := GetProcAddress(Module, 'BZ2_bzDecompress');
@@ -141,7 +128,7 @@ begin
   Result:=true;
 end;
 
-function BZAllocMem(AppData: Pointer; Items, Size: Cardinal): Pointer; stdcall;
+function BZAllocMem(AppData: Pointer; Items, Size: Integer): Pointer; cdecl;
 begin
   try
     GetMem(Result, Items * Size);
@@ -152,7 +139,7 @@ begin
   end;
 end;
 
-procedure BZFreeMem(AppData, Block: Pointer); stdcall;
+procedure BZFreeMem(AppData, Block: Pointer); cdecl;
 begin
   FreeMem(Block);
 end;
@@ -200,12 +187,12 @@ const
     bzDecompress* allocate is 64116 + 3600000 bytes, when decompressing data
     compressed at level 9 }
 
-function DecompressorAllocMem(AppData: Pointer; Items, Size: Cardinal): Pointer; stdcall;
+function DecompressorAllocMem(AppData: Pointer; Items, Size: Integer): Pointer; cdecl;
 begin
-  Result := TBZDecompressor(AppData).Malloc(Items * Size);
+  Result := TBZDecompressor(AppData).Malloc(Cardinal(Items) * Cardinal(Size));
 end;
 
-procedure DecompressorFreeMem(AppData, Block: Pointer); stdcall;
+procedure DecompressorFreeMem(AppData, Block: Pointer); cdecl;
 begin
   { Since bzlib doesn't repeatedly deallocate and allocate blocks during a
     decompression run, we don't have to handle frees. }
@@ -214,7 +201,9 @@ end;
 constructor TBZDecompressor.Create(AReadProc: TDecompressorReadProc);
 begin
   inherited Create(AReadProc);
-  FHeapBase := VirtualAlloc(nil, DecompressorHeapSize, MEM_RESERVE, PAGE_NOACCESS);
+  { POSIX port: plain allocation instead of the VirtualAlloc reserve/commit
+    scheme (the fragmentation workaround it implemented is Win32-specific) }
+  FHeapBase := GetMem(DecompressorHeapSize);
   if FHeapBase = nil then
     OutOfMemoryError;
   FHeapNextFree := FHeapBase;
@@ -232,7 +221,7 @@ begin
   if FInitialized then
     BZ2_bzDecompressEnd(FStrm);
   if Assigned(FHeapBase) then
-    VirtualFree(FHeapBase, 0, MEM_RELEASE);
+    FreeMem(FHeapBase);
   inherited Destroy;
 end;
 
@@ -246,15 +235,11 @@ begin
     unless this unit is used with a different version of bzlib that allocates
     more memory. Note: The funky Cardinal casts are there to convince
     Delphi (2) to do an unsigned compare. }
-  if Cardinal(Cardinal(FHeapNextFree) - Cardinal(FHeapBase) + Bytes) > Cardinal(DecompressorHeapSize) then
+  if PtrUInt(PtrUInt(FHeapNextFree) - PtrUInt(FHeapBase) + Bytes) > Cardinal(DecompressorHeapSize) then
     raise ECompressInternalError.Create(SBzlibAllocError);
 
-  if VirtualAlloc(FHeapNextFree, Bytes, MEM_COMMIT, PAGE_READWRITE) = nil then
-    Result := nil
-  else begin
-    Result := FHeapNextFree;
-    Inc(Cardinal(FHeapNextFree), Bytes);
-  end;
+  Result := FHeapNextFree;
+  Inc(PByte(FHeapNextFree), Bytes);
 end;
 
 procedure TBZDecompressor.DecompressInto(var Buffer; Count: Longint);
